@@ -34,15 +34,25 @@ func getOrdersFromQueueASB(ctx context.Context, client *azservicebus.Client, ord
 	for _, message := range messages {
 		log.Printf("ASB message received: %s\n", string(message.Body))
 
-		// Assuming the message body is the JSON data itself
-		order, err := unmarshalOrderFromQueue(message.Body)
+		var order Order
+		err := json.Unmarshal(message.Body, &order)
+
+		// If that fails, it might be a double-encoded JSON String (like your example)
+		if err != nil {
+			var jsonStr string
+			// Try unwrapping it as a string first
+			if errString := json.Unmarshal(message.Body, &jsonStr); errString == nil {
+				// If that worked, unmarshal the inner string into the Order struct
+				err = json.Unmarshal([]byte(jsonStr), &order)
+			}
+		}
+
+		// If it STILL fails, the data is bad. Abandon the message.
 		if err != nil {
 			log.Printf("failed to unmarshal ASB message: %v", err)
 			receiver.AbandonMessage(context.TODO(), message, nil)
 			continue
 		}
-
-		orders = append(orders, order)
 
 		err = receiver.CompleteMessage(context.TODO(), message, nil)
 		if err != nil {

@@ -37,7 +37,7 @@ func getOrdersFromQueueASB(ctx context.Context, client *azservicebus.Client, ord
 		var order Order
 		err := json.Unmarshal(message.Body, &order)
 
-		// If that fails, it might be a double-encoded JSON String (like your example)
+		// If that fails, might be a double-encoded JSON String
 		if err != nil {
 			var jsonStr string
 			// Try unwrapping it as a string first
@@ -53,6 +53,15 @@ func getOrdersFromQueueASB(ctx context.Context, client *azservicebus.Client, ord
 			receiver.AbandonMessage(context.TODO(), message, nil)
 			continue
 		}
+
+		// Generate ID if missing
+		if order.OrderID == "" {
+			order.OrderID = strconv.Itoa(rand.Intn(100000))
+		}
+		order.Status = Pending
+
+		// Add to list
+		orders = append(orders, order)
 
 		err = receiver.CompleteMessage(context.TODO(), message, nil)
 		if err != nil {

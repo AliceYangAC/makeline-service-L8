@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -91,16 +90,16 @@ func startOrderListener(service *OrderService) {
 		log.Println("Listener connected via Workload Identity.")
 	}
 
-	// Create shipping sender from environment variable
-	shippingQueueName := os.Getenv("SHIPPING_QUEUE_NAME")
-	if shippingQueueName == "" {
-		shippingQueueName = "shipping"
-	}
+	// // Create shipping sender from environment variable
+	// shippingQueueName := os.Getenv("SHIPPING_QUEUE_NAME")
+	// if shippingQueueName == "" {
+	// 	shippingQueueName = "shipping"
+	// }
 
-	shippingSender, err := client.NewSender(shippingQueueName, nil)
-	if err != nil {
-		log.Fatalf("Failed to create shipping sender: %v", err)
-	}
+	// shippingSender, err := client.NewSender(shippingQueueName, nil)
+	// if err != nil {
+	// 	log.Fatalf("Failed to create shipping sender: %v", err)
+	// }
 
 	// Define the handler function for processing each order
 	saveToDbHandler := func(order Order) error {
@@ -114,29 +113,28 @@ func startOrderListener(service *OrderService) {
 		}
 
 		// Create a specific payload for the shipping service
-		shippingPayload := map[string]interface{}{
-			"orderId":  order.OrderID,
-			"shipping": order.Shipping,
-			"status":   "ReadyForShipment",
-		}
+		// shippingPayload := map[string]interface{}{
+		// 	"orderId":  order.OrderID,
+		// 	"shipping": order.Shipping,
+		// }
 
-		body, err := json.Marshal(shippingPayload)
-		if err != nil {
-			log.Printf("Failed to marshal shipping payload: %v", err)
-			// Don't fail the order just because shipping notification failed
-			return nil
-		}
+		// body, err := json.Marshal(shippingPayload)
+		// if err != nil {
+		// 	log.Printf("Failed to marshal shipping payload: %v", err)
+		// 	// Don't fail the order just because shipping notification failed
+		// 	return nil
+		// }
 
-		err = shippingSender.SendMessage(ctx, &azservicebus.Message{
-			Body: body,
-		}, nil)
+		// err = shippingSender.SendMessage(ctx, &azservicebus.Message{
+		// 	Body: body,
+		// }, nil)
 
-		if err != nil {
-			log.Printf("Failed to send to shipping queue: %v", err)
-			// Ideally, you might want to implement a retry here or flag the DB record
-		} else {
-			log.Printf("Shipping request sent for Order %s", order.OrderID)
-		}
+		// if err != nil {
+		// 	log.Printf("Failed to send to shipping queue: %v", err)
+		// 	// Ideally, you might want to implement a retry here or flag the DB record
+		// } else {
+		// 	log.Printf("Shipping request sent for Order %s", order.OrderID)
+		// }
 
 		log.Println("Order processing complete.")
 		return nil
@@ -174,42 +172,6 @@ func OrderMiddleware(orderService *OrderService) gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-// Fetches orders from the order queue and stores them in database
-// func fetchOrders(c *gin.Context) {
-// 	client, ok := c.MustGet("orderService").(*OrderService)
-// 	if !ok {
-// 		log.Printf("Failed to get order service")
-// 		c.AbortWithStatus(http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Get orders from the queue
-// 	orders, err := getOrdersFromQueue()
-// 	if err != nil {
-// 		log.Printf("Failed to fetch orders from queue: %s", err)
-// 		c.AbortWithStatus(http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Save orders to database
-// 	err = client.repo.InsertOrders(orders)
-// 	if err != nil {
-// 		log.Printf("Failed to save orders to database: %s", err)
-// 		c.AbortWithStatus(http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Return the orders to be processed
-// 	orders, err = client.repo.GetPendingOrders()
-// 	if err != nil {
-// 		log.Printf("Failed to get pending orders from database: %s", err)
-// 		c.AbortWithStatus(http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	c.IndentedJSON(http.StatusOK, orders)
-// }
 
 // Gets a single order from database by order ID
 func getOrder(c *gin.Context) {

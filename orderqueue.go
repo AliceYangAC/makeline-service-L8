@@ -63,7 +63,8 @@ func ListenForOrdersASB(ctx context.Context, client *azservicebus.Client, orderQ
 			if order.OrderID == "" {
 				order.OrderID = strconv.Itoa(rand.Intn(100000))
 			}
-			order.Status = Pending
+
+			order.Status = 1 // Pending
 
 			// 3. Pass to Business Logic (The Handler)
 			if err := handleOrder(order); err != nil {
@@ -122,7 +123,7 @@ func getOrdersFromQueueASB(ctx context.Context, client *azservicebus.Client, ord
 		if order.OrderID == "" {
 			order.OrderID = strconv.Itoa(rand.Intn(100000))
 		}
-		order.Status = Pending
+		order.Status = 1 // Pending
 
 		// Add to list
 		orders = append(orders, order)

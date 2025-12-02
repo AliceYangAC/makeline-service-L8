@@ -72,16 +72,12 @@ func NewCosmosDBOrderRepo(cosmosDbEndpoint string, dbName string, containerName 
 	return &CosmosDBOrderRepo{container, partitionKey}, nil
 }
 
-func (r *CosmosDBOrderRepo) GetPendingOrders() ([]Order, error) {
+func (r *CosmosDBOrderRepo) GetAllOrders() ([]Order, error) {
 	var orders []Order
 
 	pk := azcosmos.NewPartitionKeyString(r.partitionKey.Value)
-	opt := &azcosmos.QueryOptions{
-		QueryParameters: []azcosmos.QueryParameter{
-			{Name: "@status", Value: Pending},
-		},
-	}
-	queryPager := r.db.NewQueryItemsPager("SELECT * FROM o WHERE o.status = @status", pk, opt)
+
+	queryPager := r.db.NewQueryItemsPager("SELECT * FROM o", pk, nil)
 
 	for queryPager.More() {
 		queryResponse, err := queryPager.NextPage(context.Background())
@@ -92,6 +88,7 @@ func (r *CosmosDBOrderRepo) GetPendingOrders() ([]Order, error) {
 
 		for _, item := range queryResponse.Items {
 			var order Order
+			// Cosmos DB SQL API returns JSON, so it uses the `json:"..."` tags in your struct
 			err := json.Unmarshal(item, &order)
 			if err != nil {
 				log.Printf("failed to deserialize order: %v\n", err)
@@ -102,6 +99,37 @@ func (r *CosmosDBOrderRepo) GetPendingOrders() ([]Order, error) {
 	}
 	return orders, nil
 }
+
+// func (r *CosmosDBOrderRepo) GetPendingOrders() ([]Order, error) {
+// 	var orders []Order
+
+// 	pk := azcosmos.NewPartitionKeyString(r.partitionKey.Value)
+// 	opt := &azcosmos.QueryOptions{
+// 		QueryParameters: []azcosmos.QueryParameter{
+// 			{Name: "@status", Value: Pending},
+// 		},
+// 	}
+// 	queryPager := r.db.NewQueryItemsPager("SELECT * FROM o WHERE o.status = @status", pk, opt)
+
+// 	for queryPager.More() {
+// 		queryResponse, err := queryPager.NextPage(context.Background())
+// 		if err != nil {
+// 			log.Printf("failed to get next page: %v\n", err)
+// 			return nil, err
+// 		}
+
+// 		for _, item := range queryResponse.Items {
+// 			var order Order
+// 			err := json.Unmarshal(item, &order)
+// 			if err != nil {
+// 				log.Printf("failed to deserialize order: %v\n", err)
+// 				return nil, err
+// 			}
+// 			orders = append(orders, order)
+// 		}
+// 	}
+// 	return orders, nil
+// }
 
 func (r *CosmosDBOrderRepo) GetOrder(id string) (Order, error) {
 	pk := azcosmos.NewPartitionKeyString(r.partitionKey.Value)
@@ -186,6 +214,8 @@ func (r *CosmosDBOrderRepo) InsertOrders(orders []Order) error {
 func (r *CosmosDBOrderRepo) UpdateOrder(order Order) error {
 	var existingOrderId string
 	pk := azcosmos.NewPartitionKeyString(r.partitionKey.Value)
+
+	// 1. Find the internal Cosmos DB 'id' using the application 'orderId'
 	opt := &azcosmos.QueryOptions{
 		QueryParameters: []azcosmos.QueryParameter{
 			{Name: "@orderId", Value: order.OrderID},
@@ -196,29 +226,92 @@ func (r *CosmosDBOrderRepo) UpdateOrder(order Order) error {
 	for queryPager.More() {
 		queryResponse, err := queryPager.NextPage(context.Background())
 		if err != nil {
+			log.Printf("failed to query for update: %v\n", err)
 			break
 		}
 
 		for _, item := range queryResponse.Items {
-			var order map[string]interface{}
-			err = json.Unmarshal(item, &order)
+			var orderDoc map[string]interface{}
+			err = json.Unmarshal(item, &orderDoc)
 			if err != nil {
-				log.Printf("failed to deserialize order: %v\n", err)
+				log.Printf("failed to deserialize order doc: %v\n", err)
 				return err
 			}
-			existingOrderId = order["id"].(string)
+			existingOrderId = orderDoc["id"].(string)
+			break
+		}
+		if existingOrderId != "" {
 			break
 		}
 	}
 
+	if existingOrderId == "" {
+		log.Printf("Order %s not found for update", order.OrderID)
+		return nil
+	}
+
+	// 2. Create the Patch Operations
 	patch := azcosmos.PatchOperations{}
+
+	// Update Status
 	patch.AppendReplace("/status", order.Status)
 
+	// Update Items (Critical for Delete Item functionality)
+	patch.AppendReplace("/items", order.Items)
+
+	// 3. Execute Patch
 	_, err := r.db.PatchItem(context.Background(), pk, existingOrderId, patch, nil)
 	if err != nil {
-		log.Printf("failed to replace item: %v\n", err)
+		log.Printf("failed to patch item: %v\n", err)
 		return err
 	}
 
+	return nil
+}
+
+// Deletes an order by OrderID
+func (r *CosmosDBOrderRepo) DeleteOrder(id string) error {
+	// 1. Find the internal Cosmos 'id' using the OrderID
+	// (Cosmos needs the partition key AND the internal 'id' to delete)
+	var existingId string
+	pk := azcosmos.NewPartitionKeyString(r.partitionKey.Value)
+	opt := &azcosmos.QueryOptions{
+		QueryParameters: []azcosmos.QueryParameter{
+			{Name: "@orderId", Value: id},
+		},
+	}
+	queryPager := r.db.NewQueryItemsPager("SELECT * FROM o WHERE o.orderId = @orderId", pk, opt)
+
+	for queryPager.More() {
+		queryResponse, err := queryPager.NextPage(context.Background())
+		if err != nil {
+			log.Printf("failed to query for delete: %v\n", err)
+			return err
+		}
+		for _, item := range queryResponse.Items {
+			var orderDoc map[string]interface{}
+			if err := json.Unmarshal(item, &orderDoc); err == nil {
+				existingId = orderDoc["id"].(string)
+				break
+			}
+		}
+		if existingId != "" {
+			break
+		}
+	}
+
+	if existingId == "" {
+		log.Printf("No order found with ID %s to delete", id)
+		return nil // Or return error "not found"
+	}
+
+	// 2. Delete the item
+	_, err := r.db.DeleteItem(context.Background(), pk, existingId, nil)
+	if err != nil {
+		log.Printf("failed to delete item: %v\n", err)
+		return err
+	}
+
+	log.Printf("Deleted order with OrderID %s (Cosmos ID: %s)", id, existingId)
 	return nil
 }

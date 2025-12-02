@@ -32,10 +32,11 @@ type Item struct {
 }
 
 type OrderRepo interface {
-	GetPendingOrders() ([]Order, error)
+	GetAllOrders() ([]Order, error)
 	GetOrder(id string) (Order, error)
 	InsertOrders(orders []Order) error
 	UpdateOrder(order Order) error
+	DeleteOrder(id string) error
 }
 
 type OrderService struct {

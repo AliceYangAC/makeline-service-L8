@@ -47,6 +47,7 @@ func main() {
 	router.GET("/order/fetch", fetchOrders)
 	router.GET("/order/:id", getOrder)
 	router.PUT("/order", updateOrder)
+	router.DELETE("/order/:id", deleteOrder)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
@@ -148,7 +149,7 @@ func startOrderListener(service *OrderService) {
 	}
 }
 
-// Fetches orders from database that are pending
+// Fetches orders from database
 func fetchOrders(c *gin.Context) {
 	client, ok := c.MustGet("orderService").(*OrderService)
 	if !ok {
@@ -156,7 +157,7 @@ func fetchOrders(c *gin.Context) {
 		return
 	}
 
-	orders, err := client.repo.GetPendingOrders()
+	orders, err := client.repo.GetAllOrders()
 	if err != nil {
 		log.Printf("Failed to get pending orders: %s", err)
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -279,6 +280,26 @@ func updateOrder(c *gin.Context) {
 	}
 
 	c.SetAccepted("202")
+}
+
+// Deletes an order (Cancellation)
+func deleteOrder(c *gin.Context) {
+	client, ok := c.MustGet("orderService").(*OrderService)
+	if !ok {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	id := c.Param("id")
+
+	err := client.repo.DeleteOrder(id) // Ensure DeleteOrder exists in your Repo Interface!
+	if err != nil {
+		log.Printf("Failed to delete order: %s", err)
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // Gets an environment variable or exits if it is not set

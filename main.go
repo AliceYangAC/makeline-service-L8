@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -34,6 +38,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// start background listener
+	go startOrderListener(orderService)
+
 	router := gin.Default()
 	router.Use(cors.Default())
 	router.Use(OrderMiddleware(orderService))
@@ -49,6 +56,116 @@ func main() {
 	router.Run(":3001")
 }
 
+// startOrderListener sets up the client and calls the shared listener function
+func startOrderListener(service *OrderService) {
+	ctx := context.Background()
+	orderQueueName := os.Getenv("ORDER_QUEUE_NAME")
+	if orderQueueName == "" {
+		orderQueueName = os.Getenv("ASB_QUEUE_NAME")
+	}
+
+	if orderQueueName == "" {
+		log.Fatalf("CRITICAL: No queue name configured. Listener cannot start.")
+	}
+
+	var client *azservicebus.Client
+	var err error
+
+	// Auth: Connection String/SAS Key
+	asbConnStr := os.Getenv("ASB_CONNECTION_STRING")
+	if asbConnStr != "" {
+		client, err = azservicebus.NewClientFromConnectionString(asbConnStr, nil)
+		if err != nil {
+			log.Fatalf("Failed to create ASB client: %v", err)
+		}
+		log.Println("Listener connected via Connection String.")
+	} else {
+		// Auth: Workload Identity
+		hostName := os.Getenv("AZURE_SERVICEBUS_FULLYQUALIFIEDNAMESPACE")
+		cred, _ := azidentity.NewDefaultAzureCredential(nil)
+		client, err = azservicebus.NewClient(hostName, cred, nil)
+		if err != nil {
+			log.Fatalf("Failed to create ASB client: %v", err)
+		}
+		log.Println("Listener connected via Workload Identity.")
+	}
+
+	// Create shipping sender from environment variable
+	shippingQueueName := os.Getenv("SHIPPING_QUEUE_NAME")
+	if shippingQueueName == "" {
+		shippingQueueName = "shipping"
+	}
+
+	shippingSender, err := client.NewSender(shippingQueueName, nil)
+	if err != nil {
+		log.Fatalf("Failed to create shipping sender: %v", err)
+	}
+
+	// Define the handler function for processing each order
+	saveToDbHandler := func(order Order) error {
+		log.Printf("Processing Order ID: %s", order.OrderID)
+
+		// Insert into MongoDB (Existing)
+		err := service.repo.InsertOrders([]Order{order})
+		if err != nil {
+			log.Printf("DB Error: %v", err)
+			return err
+		}
+
+		// Create a specific payload for the shipping service
+		shippingPayload := map[string]interface{}{
+			"orderId":  order.OrderID,
+			"shipping": order.Shipping,
+			"status":   "ReadyForShipment",
+		}
+
+		body, err := json.Marshal(shippingPayload)
+		if err != nil {
+			log.Printf("Failed to marshal shipping payload: %v", err)
+			// Don't fail the order just because shipping notification failed
+			return nil
+		}
+
+		err = shippingSender.SendMessage(ctx, &azservicebus.Message{
+			Body: body,
+		}, nil)
+
+		if err != nil {
+			log.Printf("Failed to send to shipping queue: %v", err)
+			// Ideally, you might want to implement a retry here or flag the DB record
+		} else {
+			log.Printf("Shipping request sent for Order %s", order.OrderID)
+		}
+
+		log.Println("Order processing complete.")
+		return nil
+	}
+
+	// Call the new function from orderqueue.go
+	err = ListenForOrdersASB(ctx, client, orderQueueName, saveToDbHandler)
+	if err != nil {
+		log.Fatalf("Listener stopped: %v", err)
+	}
+}
+
+// Fetches orders from database that are pending
+func fetchOrders(c *gin.Context) {
+	client, ok := c.MustGet("orderService").(*OrderService)
+	if !ok {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	orders, err := client.repo.GetPendingOrders()
+	if err != nil {
+		log.Printf("Failed to get pending orders: %s", err)
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, orders)
+}
+
 // OrderMiddleware is a middleware function that injects the order service into the request context
 func OrderMiddleware(orderService *OrderService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -58,40 +175,40 @@ func OrderMiddleware(orderService *OrderService) gin.HandlerFunc {
 }
 
 // Fetches orders from the order queue and stores them in database
-func fetchOrders(c *gin.Context) {
-	client, ok := c.MustGet("orderService").(*OrderService)
-	if !ok {
-		log.Printf("Failed to get order service")
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+// func fetchOrders(c *gin.Context) {
+// 	client, ok := c.MustGet("orderService").(*OrderService)
+// 	if !ok {
+// 		log.Printf("Failed to get order service")
+// 		c.AbortWithStatus(http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Get orders from the queue
-	orders, err := getOrdersFromQueue()
-	if err != nil {
-		log.Printf("Failed to fetch orders from queue: %s", err)
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+// 	// Get orders from the queue
+// 	orders, err := getOrdersFromQueue()
+// 	if err != nil {
+// 		log.Printf("Failed to fetch orders from queue: %s", err)
+// 		c.AbortWithStatus(http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Save orders to database
-	err = client.repo.InsertOrders(orders)
-	if err != nil {
-		log.Printf("Failed to save orders to database: %s", err)
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+// 	// Save orders to database
+// 	err = client.repo.InsertOrders(orders)
+// 	if err != nil {
+// 		log.Printf("Failed to save orders to database: %s", err)
+// 		c.AbortWithStatus(http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Return the orders to be processed
-	orders, err = client.repo.GetPendingOrders()
-	if err != nil {
-		log.Printf("Failed to get pending orders from database: %s", err)
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+// 	// Return the orders to be processed
+// 	orders, err = client.repo.GetPendingOrders()
+// 	if err != nil {
+// 		log.Printf("Failed to get pending orders from database: %s", err)
+// 		c.AbortWithStatus(http.StatusInternalServerError)
+// 		return
+// 	}
 
-	c.IndentedJSON(http.StatusOK, orders)
-}
+// 	c.IndentedJSON(http.StatusOK, orders)
+// }
 
 // Gets a single order from database by order ID
 func getOrder(c *gin.Context) {

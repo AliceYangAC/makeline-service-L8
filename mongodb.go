@@ -66,12 +66,13 @@ func (r *MongoDBOrderRepo) GetAllOrders() ([]Order, error) {
 	}
 	defer cursor.Close(ctx)
 
-	// ... (rest of the function remains the same) ...
+	// Check if there was an error during iteration
 	if err := cursor.Err(); err != nil {
 		log.Printf("Failed to find records: %s", err)
 		return nil, err
 	}
 
+	// Iterate over the cursor and decode each document
 	for cursor.Next(ctx) {
 		var order Order
 		// Ensure your struct BSON tags match your DB if decoding fails

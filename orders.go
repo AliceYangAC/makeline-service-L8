@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 type Order struct {
 	OrderID    string       `json:"orderId"`
 	CustomerID string       `json:"customerId"`
@@ -9,13 +11,14 @@ type Order struct {
 }
 
 type ShippingInfo struct {
-	Address1   string `json:"address1"`
-	Address2   string `json:"address2"`
-	City       string `json:"city"`
-	Province   string `json:"province"`
-	PostalCode string `json:"postalCode"`
-	Country    string `json:"country"`
-	Duration   int    `json:"duration"`
+	Address1   string    `json:"address1"`
+	Address2   string    `json:"address2"`
+	City       string    `json:"city"`
+	Province   string    `json:"province"`
+	PostalCode string    `json:"postalCode"`
+	Country    string    `json:"country"`
+	ShippedAt  time.Time `json:"shippedAt" bson:"shippedAt"`
+	Duration   int       `json:"duration"`
 }
 
 type Status int

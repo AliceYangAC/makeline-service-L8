@@ -9,14 +9,13 @@ type Order struct {
 }
 
 type ShippingInfo struct {
-	Address1       string `json:"address1"`
-	Address2       string `json:"address2"`
-	City           string `json:"city"`
-	Province       string `json:"province"`
-	PostalCode     string `json:"postalCode"`
-	Country        string `json:"country"`
-	TrackingNumber string `json:"trackingNumber"`
-	Duration       int    `json:"duration"`
+	Address1   string `json:"address1"`
+	Address2   string `json:"address2"`
+	City       string `json:"city"`
+	Province   string `json:"province"`
+	PostalCode string `json:"postalCode"`
+	Country    string `json:"country"`
+	Duration   int    `json:"duration"`
 }
 
 type Status int

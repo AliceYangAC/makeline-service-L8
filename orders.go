@@ -16,7 +16,6 @@ type ShippingInfo struct {
 	PostalCode     string `json:"postalCode"`
 	Country        string `json:"country"`
 	TrackingNumber string `json:"trackingNumber"`
-	ShippedAt      string `json:"shippedAt"`
 	Duration       int    `json:"duration"`
 }
 

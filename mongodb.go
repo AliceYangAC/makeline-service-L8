@@ -164,7 +164,7 @@ func (r *MongoDBOrderRepo) UpdateOrder(order Order) error {
 	update := bson.D{
 		{Key: "$set", Value: bson.D{
 			{Key: "status", Value: order.Status},
-			{Key: "items", Value: order.Items}, // 👈 NEW: Update items array
+			{Key: "items", Value: order.Items},
 		}},
 	}
 
